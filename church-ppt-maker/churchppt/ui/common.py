@@ -82,6 +82,14 @@ def open_path(path: str | Path) -> None:
         subprocess.Popen(["xdg-open", p])
 
 
+def open_web_search(query: str) -> None:
+    """기본 브라우저로 네이버 검색 열기 (무료, 로그인 불필요)."""
+    from urllib.parse import quote_plus
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+    QDesktopServices.openUrl(QUrl("https://search.naver.com/search.naver?query=" + quote_plus(query)))
+
+
 def ask_yes_no(parent, title: str, text: str) -> bool:
     return QMessageBox.question(parent, title, text, QMessageBox.Yes | QMessageBox.No,
                                 QMessageBox.Yes) == QMessageBox.Yes

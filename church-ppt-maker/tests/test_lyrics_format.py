@@ -118,3 +118,23 @@ def test_files(tmp_path):
 def test_safe_filename():
     assert safe_filename('주 은혜/임을: "새"?') == "주 은혜 임을 새"
     assert safe_filename("   ") == "제목없음"
+
+
+def test_clean_pasted_lyrics():
+    from churchppt.lyrics_format import clean_pasted_lyrics
+    raw = "G  D/F#  Em7\n주님의 사랑 (x2)\n\n\n\n출처: https://example.com\n찬양해 반복\nCopyright © 누군가"
+    assert clean_pasted_lyrics(raw) == "주님의 사랑\n\n찬양해"
+
+
+def test_auto_structure_hymn_style():
+    text = "1. 첫째 절 가사\n이어지는 줄\n\n(후렴)\n후렴 가사\n\n2. 둘째 절 가사\n이어지는 줄"
+    sections, order = auto_structure(text)
+    assert [s.label for s in sections] == ["Verse 1", "Chorus", "Verse 2"]
+
+
+def test_auto_structure_hymn_numbers_without_label():
+    text = "1. 첫째 절\n줄\n\n후렴 같은 연\n줄\n\n2. 둘째 절\n줄"
+    sections, order = auto_structure(text)
+    assert [s.label for s in sections] == ["Verse 1", "Chorus", "Verse 2"]
+    assert sections[0].lines[0] == "첫째 절"
+    assert order == ["Verse 1", "Chorus", "Verse 2", "Chorus"]

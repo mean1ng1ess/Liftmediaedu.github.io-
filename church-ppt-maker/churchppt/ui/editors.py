@@ -5,19 +5,20 @@ import datetime as dt
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog,
                                QFormLayout, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QVBoxLayout, QWidget)
 
-from ..lyrics_format import (auto_structure, format_order, parse_song_text,
+from ..lyrics_format import (auto_structure, clean_pasted_lyrics, format_order,
+                             parse_song_text,
                              read_text_file, resolve_order, sections_to_body)
 from ..models import Song
 from ..service import (ITEM_COVER, ITEM_SCRIPTURE, ITEM_SERMON, ITEM_SONG,
                        ITEM_TEXT, ServiceItem, item_slides, item_to_song)
 from ..settings import BIBLE_TRANSLATIONS
-from .common import LyricsHighlighter, ask_yes_no, run_task
+from .common import LyricsHighlighter, ask_yes_no, open_web_search, run_task
 
 SONG_PLACEHOLDER = """여기에 가사를 쓰거나 붙여넣으세요.
 
@@ -93,17 +94,16 @@ class SongEditor(ItemEditor):
         title_row.addWidget(self.btn_search)
         lay.addLayout(title_row)
 
-        grid = QGridLayout()
+        self.grid = QGridLayout()
+        self.btn_paste = _big_button("📋  복사한 가사 붙여넣기 + 자동 나누기", primary=True)
         self.btn_structure = _big_button("✂️  붙여넣은 가사 AI로 파트 나누기")
-        self.btn_sheet = _big_button("🎼  악보 사진으로 만들기")
-        self.btn_auto = _big_button("⚡  AI 없이 자동 나누기")
+        self.btn_sheet = _big_button("🎼  악보 사진으로 만들기 (AI)")
+        self.btn_auto = _big_button("⚡  자동 나누기")
         self.btn_open = _big_button("📂  메모장(txt) 불러오기")
         self.btn_save = _big_button("💾  메모장(txt)으로 저장")
         self.btn_ppt = _big_button("📄  이 곡만 PPT 만들기")
-        for i, b in enumerate((self.btn_structure, self.btn_sheet, self.btn_auto,
-                               self.btn_open, self.btn_save, self.btn_ppt)):
-            grid.addWidget(b, i // 3, i % 3)
-        lay.addLayout(grid)
+        lay.addLayout(self.grid)
+        self.update_ai_mode()
 
         order_row = QHBoxLayout()
         order_row.addWidget(QLabel("순서(송폼):"))
@@ -129,6 +129,7 @@ class SongEditor(ItemEditor):
         self.changed.connect(self._update_info)
 
         self.btn_search.clicked.connect(self.on_search)
+        self.btn_paste.clicked.connect(self.on_paste)
         self.btn_structure.clicked.connect(self.on_structure)
         self.btn_sheet.clicked.connect(self.on_sheet)
         self.btn_auto.clicked.connect(self.on_auto)
@@ -209,11 +210,33 @@ class SongEditor(ItemEditor):
         QMessageBox.information(self, "완료", msg)
 
     # --- 버튼 ---------------------------------------------------------
+    def update_ai_mode(self) -> None:
+        """AI(API 키)가 없으면 무료 기능만 보여준다."""
+        ai = self.ctx.has_ai()
+        self.btn_search.setText("🔍  AI로 가사 찾기" if ai else "🔍  인터넷에서 가사 검색")
+        buttons = [self.btn_paste, self.btn_auto]
+        if ai:
+            buttons += [self.btn_structure, self.btn_sheet]
+        buttons += [self.btn_open, self.btn_save, self.btn_ppt]
+        for b in (self.btn_paste, self.btn_auto, self.btn_structure, self.btn_sheet,
+                  self.btn_open, self.btn_save, self.btn_ppt):
+            self.grid.removeWidget(b)
+            b.setVisible(b in buttons)
+        cols = 3 if len(buttons) <= 6 else 4
+        for i, b in enumerate(buttons):
+            self.grid.addWidget(b, i // cols, i % cols)
+
     def on_search(self) -> None:
         title = self.title.text().strip()
         if not title:
             QMessageBox.information(self, "알림", "먼저 찬양 제목을 입력해 주세요.")
             self.title.setFocus()
+            return
+        if not self.ctx.has_ai():
+            query = f"{title} {self.artist.text().strip()} 가사".replace("  ", " ")
+            open_web_search(query)
+            self.ctx.status("브라우저에서 가사를 드래그해서 복사(Ctrl+C)한 뒤 "
+                            "[📋 복사한 가사 붙여넣기 + 자동 나누기] 를 누르세요.")
             return
         if not self._confirm_replace():
             return
@@ -256,6 +279,23 @@ class SongEditor(ItemEditor):
         title = self.title.text().strip()
         run_task(self, f"악보 {len(files)}장을 분석하는 중입니다...\n(1분 정도 걸릴 수 있습니다)",
                  lambda: client.read_sheet_music(files, title), lambda song: self._after_ai(song))
+
+    def on_paste(self) -> None:
+        text = QGuiApplication.clipboard().text()
+        if not text.strip():
+            QMessageBox.information(self, "알림", "복사된 글자가 없습니다.\n"
+                                    "인터넷이나 문서에서 가사를 드래그하고 Ctrl+C 로 복사한 뒤 다시 눌러 주세요.")
+            return
+        if not self._confirm_replace():
+            return
+        self._loading = True
+        self.body.setPlainText(clean_pasted_lyrics(text))
+        self._loading = False
+        self.on_auto()
+        if self.title.text().strip():
+            saved = self.ctx.save_song_txt(self.current_song(), auto=True)
+            if saved:
+                self.ctx.status(f"가사를 나누고 메모장 파일로 저장했습니다: {saved}")
 
     def on_auto(self) -> None:
         raw = self.body.toPlainText()
@@ -336,6 +376,10 @@ class ScriptureEditor(ItemEditor):
         self.translation.currentTextChanged.connect(self._emit)
         self.text.textChanged.connect(self._emit)
         self.btn_fetch.clicked.connect(self.on_fetch)
+        self.update_ai_mode()
+
+    def update_ai_mode(self) -> None:
+        self.btn_fetch.setText("📖  AI로 본문 가져오기" if self.ctx.has_ai() else "📖  인터넷에서 본문 검색")
 
     def load(self, item: ServiceItem) -> None:
         self._loading = True
@@ -354,6 +398,10 @@ class ScriptureEditor(ItemEditor):
         ref = self.reference.text().strip()
         if not ref:
             QMessageBox.information(self, "알림", "본문 구절을 입력해 주세요. (예: 요한복음 3:16-18)")
+            return
+        if not self.ctx.has_ai():
+            open_web_search(f"{ref} {self.translation.currentText().strip()}")
+            self.ctx.status("브라우저에서 본문을 복사해 아래 칸에 붙여넣으세요. (한 줄에 한 절)")
             return
         if self.text.toPlainText().strip() and not ask_yes_no(self, "본문 바꾸기", "지금 입력된 본문을 바꿀까요?"):
             return
@@ -416,6 +464,10 @@ class SermonEditor(ItemEditor):
             w.textChanged.connect(self._emit)
         self.body.textChanged.connect(self._emit)
         self.btn_ai.clicked.connect(self.on_ai)
+        self.update_ai_mode()
+
+    def update_ai_mode(self) -> None:
+        self.btn_ai.setVisible(self.ctx.has_ai())
 
     def load(self, item: ServiceItem) -> None:
         self._loading = True

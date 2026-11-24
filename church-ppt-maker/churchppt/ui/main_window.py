@@ -34,8 +34,9 @@ from .template_editor import TemplateEditorDialog
 
 WELCOME = """<h2>교회 PPT 메이커</h2>
 <p style="font-size:11pt; line-height:150%">
-<b>1.</b> 왼쪽 아래 <b>[+ 찬양]</b> 을 누르고 제목을 입력한 뒤 <b>[AI로 가사 찾기]</b><br>
-&nbsp;&nbsp;&nbsp;&nbsp;· 가사를 붙여넣고 <b>[AI로 파트 나누기]</b> 를 하거나, <b>[악보 사진으로 만들기]</b> 도 됩니다<br>
+<b>1.</b> 왼쪽 아래 <b>[+ 찬양]</b> → 제목 입력 → <b>[🔍 인터넷에서 가사 검색]</b><br>
+&nbsp;&nbsp;&nbsp;&nbsp;· 브라우저에서 가사를 드래그해 복사(Ctrl+C) → <b>[📋 복사한 가사 붙여넣기 + 자동 나누기]</b><br>
+&nbsp;&nbsp;&nbsp;&nbsp;· 반복되는 부분은 Chorus 로 자동 구분, 반복이 없으면 쭉 이어지는 가사로 (무료, 로그인 필요 없음)<br>
 &nbsp;&nbsp;&nbsp;&nbsp;· 가사는 자동으로 메모장(txt) 파일로 저장되고, 오른쪽 <b>가사 보관함</b>에서 다시 쓸 수 있습니다<br>
 <b>2.</b> <b>[+ 성경]</b>, <b>[+ 설교]</b>, <b>[+ 광고]</b>, <b>[+ 표지]</b> 로 예배 순서를 채우세요 (끌어서 순서 변경)<br>
 <b>3.</b> 위쪽에서 <b>템플릿</b>(디자인)을 고르거나 <b>[템플릿 편집]</b> 으로 꾸미세요<br>
@@ -248,6 +249,9 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def status(self, msg: str) -> None:
         self.statusBar().showMessage(msg, 8000)
+
+    def has_ai(self) -> bool:
+        return bool(self.settings.effective_api_key())
 
     def ai_client(self) -> AIClient | None:
         key = self.settings.effective_api_key()
@@ -651,4 +655,7 @@ class MainWindow(QMainWindow):
                 self._ensure_templates()
                 self.reload_templates()
                 self.refresh_library()
+            for ed in self.editors.values():
+                if hasattr(ed, "update_ai_mode"):
+                    ed.update_ai_mode()
             self.status("설정을 저장했습니다.")

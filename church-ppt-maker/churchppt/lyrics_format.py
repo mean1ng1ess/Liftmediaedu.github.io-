@@ -61,10 +61,15 @@ _LABEL_RE = re.compile(r"^(?P<name>[^\d]+?)\s*(?P<num>\d+)?$")
 _KOREAN_VERSE_RE = re.compile(r"^(?P<num>\d+)\s*절$")
 
 
+_WRAPPERS = [("[", "]"), ("(", ")"), ("<", ">"), ("【", "】"), ("〔", "〕"), ("〈", "〉"), ("《", "》")]
+
+
 def _clean_label(text: str) -> str:
     t = text.strip()
-    if t.startswith("[") and t.endswith("]"):
-        t = t[1:-1]
+    for a, b in _WRAPPERS:
+        if t.startswith(a) and t.endswith(b):
+            t = t[1:-1]
+            break
     t = t.strip().rstrip(":：").strip()
     return re.sub(r"\s+", " ", t)
 
@@ -306,16 +311,96 @@ def _stanzas(text: str) -> list[list[str]]:
     return stanzas
 
 
+_CHORD_TOKEN = re.compile(r"^[A-G][#b♯♭]?(m|maj|min|dim|aug|sus|add)?\d*(sus\d*|add\d*)?(/[A-G][#b♯♭]?)?$")
+_REPEAT_MARK = re.compile(r"\s*[\(\[]?\s*(x|×|X)\s*\d+\s*[\)\]]?\s*$|\s*\(?반복\)?\s*$")
+_JUNK_LINE = re.compile(r"(https?://|www\.|©|copyright|all rights reserved|가사\s*출처|^출처|^작사|^작곡|^편곡)", re.I)
+_HYMN_VERSE = re.compile(r"^(\d{1,2})\s*[.)]\s*(.+)$")
+
+
+def _is_chord_line(line: str) -> bool:
+    tokens = line.replace("|", " ").split()
+    return bool(tokens) and all(_CHORD_TOKEN.match(t) for t in tokens)
+
+
+def clean_pasted_lyrics(text: str) -> str:
+    """인터넷에서 복사한 가사 정리: 코드(G, Am7..), 'x2', 출처/주소 줄 제거, 빈 줄 정리."""
+    out: list[str] = []
+    for raw in text.replace("\r\n", "\n").replace("\u00a0", " ").split("\n"):
+        line = re.sub(r"[ \t]+", " ", raw).strip()
+        if line and (_is_chord_line(line) or _JUNK_LINE.search(line)):
+            continue
+        if line and not is_header_line(line):
+            line = _REPEAT_MARK.sub("", line).strip()
+            if not line:
+                continue
+        if not line and (not out or out[-1] == ""):
+            continue
+        out.append(line)
+    while out and out[-1] == "":
+        out.pop()
+    return "\n".join(out)
+
+
+def _hymn_structure(stanzas: list[list[str]]) -> tuple[list[Section], list[str]] | None:
+    """찬송가 형식: '1. 가사', '2. 가사' 로 시작하는 연 = 절, 번호 없는 연 = 후렴."""
+    if sum(1 for st in stanzas if _HYMN_VERSE.match(st[0])) < 2:
+        return None
+    sections: list[Section] = []
+    verses: list[str] = []
+    chorus: Section | None = None
+    for st in stanzas:
+        m = _HYMN_VERSE.match(st[0])
+        if m:
+            label = f"Verse {int(m.group(1))}"
+            sections.append(Section(label, [m.group(2).strip()] + st[1:]))
+            verses.append(label)
+        elif chorus is None:
+            chorus = Section("Chorus", list(st))
+            sections.append(chorus)
+        else:
+            chorus.lines += [""] + list(st)
+    order: list[str] = []
+    if chorus is not None:
+        for v in verses:
+            order += [v, "Chorus"]
+    return sections, order
+
+
 def auto_structure(text: str) -> tuple[list[Section], list[str]]:
     """머리말이 있으면 그대로, 없으면 반복되는 연을 후렴으로 추정.
 
     반복되는 부분이 없으면 '쭉 이어지는 가사'(라벨 없음)로 둔다.
     """
-    if any(is_header_line(ln) for ln in text.splitlines()):
-        return parse_body(text), []
+    lines = text.splitlines()
+    if any(is_header_line(ln) for ln in lines):
+        # 머리말 통일: '(후렴)', 'Verse 1:' -> '[Chorus]', '[Verse 1]'
+        # 찬송가식 '1. 가사' 로 시작하는 연도 [Verse 1] 로 바꾼다.
+        numbered = sum(1 for i, ln in enumerate(lines)
+                       if _HYMN_VERSE.match(ln.strip()) and (i == 0 or not lines[i - 1].strip()))
+        out: list[str] = []
+        for i, ln in enumerate(lines):
+            s = ln.strip()
+            m = _HYMN_VERSE.match(s)
+            if is_header_line(s):
+                out.append(f"[{normalize_label(s)}]")
+            elif numbered >= 2 and m and (i == 0 or not lines[i - 1].strip()):
+                out += [f"[Verse {int(m.group(1))}]", m.group(2).strip()]
+            else:
+                out.append(ln)
+        sections = parse_body("\n".join(out))
+        order: list[str] = []
+        labels = [s.label for s in sections]
+        if numbered >= 2 and "Chorus" in labels and labels.count("Chorus") == 1:
+            for lb in labels:
+                if lb.startswith("Verse"):
+                    order += [lb, "Chorus"]
+        return sections, order
     stanzas = _stanzas(text)
     if not stanzas:
         return [], []
+    hymn = _hymn_structure(stanzas)
+    if hymn:
+        return hymn
     keys = ["\n".join(s).replace(" ", "") for s in stanzas]
     counts: dict[str, int] = {}
     for k in keys:

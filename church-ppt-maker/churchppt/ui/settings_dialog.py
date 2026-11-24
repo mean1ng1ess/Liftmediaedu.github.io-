@@ -23,9 +23,10 @@ class SettingsDialog(QDialog):
         lay = QVBoxLayout(self)
 
         intro = QLabel(
-            "AI 기능(가사 찾기, 파트 나누기, 악보 읽기, 성경 본문, 설교 요약)을 쓰려면 "
-            "Anthropic의 <b>Claude API 키</b>가 필요합니다. 사용한 만큼 요금이 부과됩니다.<br>"
-            "AI 없이도 가사를 직접 붙여넣어 PPT를 만들 수 있습니다.")
+            "<b>API 키 없이도 모든 기본 기능은 무료로 쓸 수 있습니다.</b> "
+            "(인터넷에서 가사 검색 → 복사 → 붙여넣기 → 자동 나누기 → PPT)<br><br>"
+            "아래는 <b>선택 사항</b>입니다. Claude API 키를 넣으면 AI 가사 찾기·악보 사진 읽기·"
+            "설교 요약이 추가되며, 사용한 만큼 요금이 부과됩니다. 필요 없으면 비워 두세요.")
         intro.setWordWrap(True)
         lay.addWidget(intro)
 
@@ -41,7 +42,7 @@ class SettingsDialog(QDialog):
         key_row.addWidget(self.api_key, 1)
         key_row.addWidget(show)
         key_row.addWidget(get_key)
-        form.addRow("Claude API 키", key_row)
+        form.addRow("Claude API 키 (선택)", key_row)
 
         self.model = QComboBox()
         self.model.setEditable(True)
