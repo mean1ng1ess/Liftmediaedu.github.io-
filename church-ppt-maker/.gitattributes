@@ -1,0 +1,2 @@
+# 윈도우 배치 파일은 CRLF 그대로 보관 (LF 이면 cmd 에서 goto 등이 오작동)
+*.bat -text
