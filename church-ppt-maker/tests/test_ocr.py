@@ -78,3 +78,21 @@ def test_windows_ocr_english_smoke(tmp_path):
     lines, _ = ocr_image(img, lang="en-US")
     text = " ".join(ln.text for ln in lines).upper()
     assert "GRACE" in text
+
+
+def test_windows_ocr_splits_every_syllable_into_its_own_line():
+    """실제 Windows OCR 결과 모양: 넓게 떨어진 글자마다 따로 '줄'로 나옴 (순서도 뒤섞임)."""
+    raw = []
+    for text, y in (("주님나를부르시네", 330), ("나의모든것드려요", 385),
+                    ("은혜의강흘러가", 710), ("기쁨의노래부르리", 765), ("할렐루야주를찬양", 1090)):
+        for i, ch in enumerate(text):
+            raw.append(OcrLine([OcrWord(ch, 155 + i * 110, y + (i % 3), 38, 38)]))
+    raw.insert(0, OcrLine([OcrWord("2.", 102, 385, 30, 34)]))
+    raw.append(OcrLine([OcrWord("은혜의", 700, 50, 300, 80), OcrWord("강가로", 1010, 50, 250, 80)]))
+    raw.reverse()
+    song = lines_to_song([(raw, 1500)])
+    assert song.title == "은혜의 강가로"
+    assert [s.label for s in song.sections] == ["Verse 1", "Chorus", "Verse 2"]
+    assert song.sections[0].lines == ["주님나를부르시네", "은혜의강흘러가"]
+    assert song.sections[2].lines == ["나의모든것드려요", "기쁨의노래부르리"]
+    assert song.sections[1].lines == ["할렐루야주를찬양"]

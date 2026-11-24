@@ -150,8 +150,30 @@ def _find_title(lines: list[OcrLine], page_h: float) -> OcrLine | None:
     return best if best.height >= statistics.median(others) * 1.3 else None
 
 
+def regroup_rows(lines: list[OcrLine]) -> list[OcrLine]:
+    """OCR 이 줄을 잘게 쪼개 돌려줘도(넓게 떨어진 글자 하나하나가 각각 '줄'),
+    단어들의 세로 위치로 같은 높이의 단어끼리 다시 한 줄로 묶는다."""
+    words = [w for ln in lines for w in ln.words]
+    if not words:
+        return []
+    words.sort(key=lambda w: w.y + w.h / 2)
+    rows: list[list[OcrWord]] = []
+    for w in words:
+        cy = w.y + w.h / 2
+        if rows:
+            row = rows[-1]
+            row_cy = statistics.median(x.y + x.h / 2 for x in row)
+            row_h = statistics.median(x.h for x in row)
+            if abs(cy - row_cy) < max(row_h, w.h) * 0.5:
+                row.append(w)
+                continue
+        rows.append([w])
+    return [OcrLine(sorted(r, key=lambda w: w.x)) for r in rows]
+
+
 def lines_to_song(pages: list[tuple[list[OcrLine], float]], title_hint: str = "") -> Song:
     """[(페이지의 OCR 줄들, 페이지 높이)] -> Song"""
+    pages = [(regroup_rows(lines), h) for lines, h in pages]
     all_words = [w.text for lines, _ in pages for ln in lines for w in ln.words]
     hangul = sum(len(_HANGUL.findall(t)) for t in all_words)
     letters = sum(sum(c.isalpha() for c in t) for t in all_words) or 1
@@ -197,7 +219,7 @@ def lines_to_song(pages: list[tuple[list[OcrLine], float]], title_hint: str = ""
         for g in groups:
             if len(g) == k:
                 # 절 번호가 적혀 있으면 그 순서를 따름
-                order = sorted(range(k), key=lambda i: (g[i].verse or 99, i)) \
+                order = sorted(range(k), key=lambda i: (g[i].verse or i + 1, i)) \
                     if any(x.verse for x in g) else list(range(k))
                 for vi, li in enumerate(order):
                     verses[vi].append(g[li].text)
