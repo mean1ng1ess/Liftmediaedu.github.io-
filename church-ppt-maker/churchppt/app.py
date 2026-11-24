@@ -26,10 +26,31 @@ def selftest(out_path: str) -> int:
     return 0 if len(read_sections(out)) == 5 else 1
 
 
+def ocrtest(image: str, out_path: str, lang: str = "ko") -> int:
+    """화면 없이 악보 OCR 점검:  ChurchPPT.exe --ocrtest 악보.png 결과.txt [ko|en-US]"""
+    from .lyrics_format import song_to_text, write_text_file
+    from .ocr import available_languages, read_sheet_music_free
+    try:
+        song = read_sheet_music_free([image], lang=lang)
+        text = song_to_text(song)
+    except Exception as e:  # 결과 파일에 원인을 남긴다
+        langs = ""
+        try:
+            langs = ", ".join(available_languages())
+        except Exception:
+            pass
+        write_text_file(out_path, f"ERROR: {e}\nOCR languages: {langs}")
+        return 1
+    write_text_file(out_path, text)
+    return 0
+
+
 def main() -> int:
     _frozen_fixups()
     if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
         return selftest(sys.argv[2])
+    if len(sys.argv) >= 4 and sys.argv[1] == "--ocrtest":
+        return ocrtest(sys.argv[2], sys.argv[3], *(sys.argv[4:5]))
 
     from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtWidgets import QApplication

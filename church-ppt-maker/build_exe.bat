@@ -12,7 +12,7 @@ if not exist ".venv\Scripts\python.exe" %PY% -m venv .venv
 if errorlevel 1 goto :fail
 
 ".venv\Scripts\pyinstaller.exe" --noconfirm --clean --onefile --windowed ^
-    --name ChurchPPT --collect-data pptx main.py
+    --name ChurchPPT --collect-data pptx --collect-submodules winrt main.py
 if errorlevel 1 goto :fail
 
 ".venv\Scripts\python.exe" -c "import subprocess,sys; sys.exit(subprocess.call([r'dist\ChurchPPT.exe','--selftest',r'dist\selftest.pptx']))"

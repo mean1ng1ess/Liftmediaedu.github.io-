@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog
                                QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QVBoxLayout, QWidget)
 
+from ..ai import AIError
 from ..lyrics_format import (auto_structure, clean_pasted_lyrics, format_order,
                              parse_song_text,
                              read_text_file, resolve_order, sections_to_body)
@@ -214,9 +215,10 @@ class SongEditor(ItemEditor):
         """AI(API 키)가 없으면 무료 기능만 보여준다."""
         ai = self.ctx.has_ai()
         self.btn_search.setText("🔍  AI로 가사 찾기" if ai else "🔍  인터넷에서 가사 검색")
-        buttons = [self.btn_paste, self.btn_auto]
+        self.btn_sheet.setText("🎼  악보 사진으로 만들기 (AI)" if ai else "🎼  악보 사진으로 만들기 (무료)")
+        buttons = [self.btn_paste, self.btn_auto, self.btn_sheet]
         if ai:
-            buttons += [self.btn_structure, self.btn_sheet]
+            buttons += [self.btn_structure]
         buttons += [self.btn_open, self.btn_save, self.btn_ppt]
         for b in (self.btn_paste, self.btn_auto, self.btn_structure, self.btn_sheet,
                   self.btn_open, self.btn_save, self.btn_ppt):
@@ -273,12 +275,36 @@ class SongEditor(ItemEditor):
             return
         if not self._confirm_replace():
             return
+        title = self.title.text().strip()
+        if not self.ctx.has_ai():
+            from ..ocr import OcrError, read_sheet_music_free
+
+            def work():
+                try:
+                    return read_sheet_music_free(files, title)
+                except OcrError as e:
+                    raise AIError(str(e)) from e
+
+            run_task(self, f"악보 {len(files)}장에서 가사를 읽는 중입니다...\n(Windows 글자 인식 · 무료)",
+                     work, self._after_free_ocr)
+            return
         client = self.ctx.ai_client()
         if client is None:
             return
-        title = self.title.text().strip()
         run_task(self, f"악보 {len(files)}장을 분석하는 중입니다...\n(1분 정도 걸릴 수 있습니다)",
                  lambda: client.read_sheet_music(files, title), lambda song: self._after_ai(song))
+
+    def _after_free_ocr(self, song: Song) -> None:
+        self.apply_song(song, replace_title=not self.title.text().strip())
+        saved = self.ctx.save_song_txt(self.current_song(), auto=True)
+        parts = ", ".join(s.label for s in song.sections if s.label) or "구분 없음"
+        msg = (f"악보에서 가사를 읽었습니다. (파트: {parts})\n"
+               + (f"메모장 파일로 저장됨: {saved}\n" if saved else "")
+               + "\n⚠ 무료 글자 인식이라 띄어쓰기·받침이 틀리거나 빠진 줄이 있을 수 있습니다.\n"
+                 "가운데 칸에서 꼭 확인하고 고쳐 주세요.\n\n"
+                 "인식한 제목으로 인터넷 가사 검색도 열어 볼까요? (정확한 가사와 비교용)")
+        if ask_yes_no(self, "악보 읽기 완료", msg) and self.title.text().strip():
+            open_web_search(f"{self.title.text().strip()} 가사")
 
     def on_paste(self) -> None:
         text = QGuiApplication.clipboard().text()
