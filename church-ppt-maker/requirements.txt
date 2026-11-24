@@ -12,3 +12,4 @@ winrt-Windows.Storage>=3.0; sys_platform == "win32"
 winrt-Windows.Storage.Streams>=3.0; sys_platform == "win32"
 winrt-Windows.Foundation>=3.0; sys_platform == "win32"
 winrt-Windows.Foundation.Collections>=3.0; sys_platform == "win32"
+numpy>=1.24

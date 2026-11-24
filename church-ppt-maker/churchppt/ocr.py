@@ -286,6 +286,69 @@ def _tiles(img, max_dim: int):
     return out, img.size
 
 
+def squeeze_lyrics(img):
+    """오선(긴 가로줄)과 음표 기둥을 지우고, 글줄마다 글자 사이 넓은 빈칸을 좁혀
+    '주   님   의' 처럼 떨어진 가사를 '주님의' 처럼 붙여 놓은 이미지를 만든다.
+    글줄의 세로 위치는 그대로 둔다 (1절/2절 구분에 필요)."""
+    import numpy as np
+    from PIL import Image
+    a = np.asarray(img.convert("L"))
+    ink = a < 140
+    H, W = ink.shape
+    ink[ink.sum(axis=1) > W * 0.35, :] = False          # 오선, 마디 가로줄
+    rows = ink.sum(axis=1) > 0
+    bands, start = [], None
+    for y in range(H + 1):
+        on = y < H and rows[y]
+        if on and start is None:
+            start = y
+        elif not on and start is not None:
+            bands.append([start, y])
+            start = None
+    merged: list[list[int]] = []
+    for b in bands:                                     # 받침 등 아주 가까운 띠는 합침
+        if merged and b[0] - merged[-1][1] <= 3:
+            merged[-1][1] = b[1]
+        else:
+            merged.append(b)
+    out = Image.new("L", (W, H), 255)
+    for y0, y1 in merged:
+        bh = y1 - y0
+        if bh < 8 or bh > H * 0.15:
+            continue
+        band = ink[y0:y1]
+        cols = band.sum(axis=0) > 0   # (세로획 ㅣ 를 지우면 안 되므로 기둥 제거는 하지 않음)
+        segs, s = [], None
+        for x in range(W + 1):
+            on = x < W and cols[x]
+            if on and s is None:
+                s = x
+            elif not on and s is not None:
+                segs.append([s, x])
+                s = None
+        glued: list[list[int]] = []
+        for sg in segs:                                 # 한 글자 안의 틈(ㅣ, ㅏ)은 붙임
+            if glued and sg[0] - glued[-1][1] < bh * 0.45:
+                glued[-1][1] = sg[1]
+            else:
+                glued.append(sg)
+        gap = max(2, int(bh * 0.3))
+        x = int(bh)
+        src = Image.fromarray(np.where(band, 0, 255).astype("uint8"))
+        for i, (x0, x1) in enumerate(glued):
+            if i and glued[i][0] - glued[i - 1][1] > bh * 3:  # 아주 멀면 띄어쓰기로
+                x += gap * 2
+            if x + (x1 - x0) >= W:
+                break
+            out.paste(src.crop((x0, 0, x1, bh)), (x, y0))
+            x += (x1 - x0) + gap
+    return out
+
+
+def _hangul_count(lines: list[OcrLine]) -> int:
+    return sum(len(_HANGUL.findall(w.text)) for ln in lines for w in ln.words)
+
+
 # ---------------------------------------------------------------------------
 # Windows OCR
 # ---------------------------------------------------------------------------
@@ -341,6 +404,19 @@ async def _recognize_file(engine, path: str) -> list[OcrLine]:
 
 
 def ocr_image(img, lang: str = "ko") -> tuple[list[OcrLine], float]:
+    """원본과 '글자 간격 좁힌' 이미지를 둘 다 읽어 한글이 더 많이 나온 쪽을 쓴다."""
+    plain = _ocr_raw(img, lang)
+    try:
+        squeezed = _ocr_raw(squeeze_lyrics(img), lang)
+    except Exception:
+        return plain
+    if _hangul_count(squeezed[0]) > _hangul_count(plain[0]):
+        # 제목 등은 원본에서 (간격 좁힌 이미지는 큰 글자 줄을 그대로 두지만 안전하게 합침)
+        return squeezed
+    return plain
+
+
+def _ocr_raw(img, lang: str = "ko") -> tuple[list[OcrLine], float]:
     """PIL 이미지 하나를 OCR. (줄 목록, 이미지 높이)"""
     import asyncio
     from winrt.windows.media.ocr import OcrEngine
