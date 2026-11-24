@@ -29,20 +29,26 @@ def selftest(out_path: str) -> int:
 def ocrtest(image: str, out_path: str, lang: str = "ko") -> int:
     """화면 없이 악보 OCR 점검:  ChurchPPT.exe --ocrtest 악보.png 결과.txt [ko|en-US]"""
     from .lyrics_format import song_to_text, write_text_file
-    from .ocr import available_languages, read_sheet_music_free
+    from .ocr import _init_thread, available_languages, lines_to_song, load_pages, ocr_image
+    raw = []
     try:
-        song = read_sheet_music_free([image], lang=lang)
-        text = song_to_text(song)
+        _init_thread()
+        pages = [ocr_image(img, lang) for img in load_pages([image])]
+        for lines, _h in pages:
+            for ln in lines:
+                raw.append(f"y={ln.top:.0f} h={ln.height:.0f} | " + " | ".join(
+                    f"{w.text}@{w.x:.0f}" for w in ln.words))
+        text = song_to_text(lines_to_song(pages))
+        code = 0
     except Exception as e:  # 결과 파일에 원인을 남긴다
         langs = ""
         try:
             langs = ", ".join(available_languages())
         except Exception:
             pass
-        write_text_file(out_path, f"ERROR: {e}\nOCR languages: {langs}")
-        return 1
-    write_text_file(out_path, text)
-    return 0
+        text, code = f"ERROR: {e}\nOCR languages: {langs}", 1
+    write_text_file(out_path, text + "\n\n--- raw OCR ---\n" + "\n".join(raw))
+    return code
 
 
 def main() -> int:
