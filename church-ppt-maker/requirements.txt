@@ -1,0 +1,15 @@
+PySide6>=6.6
+python-pptx>=1.0.2
+anthropic>=2.13.0
+Pillow>=10.0
+pypdfium2>=4.0
+# 무료 악보 읽기 (Windows 기본 글자 인식)
+winrt-runtime>=3.0; sys_platform == "win32"
+winrt-Windows.Media.Ocr>=3.0; sys_platform == "win32"
+winrt-Windows.Globalization>=3.0; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging>=3.0; sys_platform == "win32"
+winrt-Windows.Storage>=3.0; sys_platform == "win32"
+winrt-Windows.Storage.Streams>=3.0; sys_platform == "win32"
+winrt-Windows.Foundation>=3.0; sys_platform == "win32"
+winrt-Windows.Foundation.Collections>=3.0; sys_platform == "win32"
+numpy>=1.24

@@ -1,0 +1,4 @@
+# GitHub Pages(Jekyll) 설정
+# church-ppt-maker 폴더는 윈도우 프로그램 소스라서 웹사이트로 처리/공개하지 않는다.
+exclude:
+  - church-ppt-maker
