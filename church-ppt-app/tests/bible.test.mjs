@@ -42,3 +42,20 @@ test("줄마다 절이면 본문 속 숫자로 자르지 않음", () => {
   const r = versesFromCopied("5 무리가 다 기뻐하여 6 사람을 세우니\n6 사도들 앞에 세우니", parseRef("행 6:5-6"));
   assert.deepEqual(r.map((x) => x.text), ["무리가 다 기뻐하여 6 사람을 세우니", "사도들 앞에 세우니"]);
 });
+
+test("앱 안 개역한글 + txt 성경 파일", async () => {
+  const fs = await import("node:fs");
+  const { versesFromBible, parseBibleTxt } = await import("../js/bible.js");
+  const krv = JSON.parse(fs.readFileSync(new URL("../bible/krv.json", import.meta.url)));
+  assert.equal(Object.keys(krv).length, 66);
+  const r = versesFromBible(krv, parseRef("요 3:16"));
+  assert.equal(r.length, 1);
+  assert.match(r[0].text, /^하나님이 세상을 이처럼 사랑하사/);
+  assert.equal(versesFromBible(krv, parseRef("행 6:1-7")).length, 7);
+  assert.equal(versesFromBible(krv, parseRef("시 23편")).length, 6);
+  assert.deepEqual(versesFromBible(krv, parseRef("롬 8:38-9:2")).map((x) => `${x.c}:${x.v}`), ["8:38", "8:39", "9:1", "9:2"]);
+  const t = parseBibleTxt("창1:1 <천지 창조> 태초에 하나님이 천지를 창조하시니라\n창1:2 땅이 혼돈하고\n요한복음 3:16 하나님이 세상을\n아무 줄");
+  assert.equal(t.verses, 3);
+  assert.equal(t.data.gen[0][0], "태초에 하나님이 천지를 창조하시니라");
+  assert.equal(versesFromBible(t.data, parseRef("요 3:16"))[0].text, "하나님이 세상을");
+});
