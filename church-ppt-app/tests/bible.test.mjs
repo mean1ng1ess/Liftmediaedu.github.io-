@@ -59,3 +59,15 @@ test("앱 안 개역한글 + txt 성경 파일", async () => {
   assert.equal(t.data.gen[0][0], "태초에 하나님이 천지를 창조하시니라");
   assert.equal(versesFromBible(t.data, parseRef("요 3:16"))[0].text, "하나님이 세상을");
 });
+
+test("조금씩 모은 성경: 빠진 절이 있으면 다시 가져오게", async () => {
+  const { versesFromBible, wholeChapters } = await import("../js/bible.js");
+  const data = { _partial: true, _full: ["act:6"], act: [[], [], [], [], [], ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]], jhn: [[], [], ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "s16"]] };
+  assert.equal(versesFromBible(data, parseRef("행 6:1-7")).length, 7);
+  assert.equal(versesFromBible(data, parseRef("행 6장")).length, 8);
+  assert.equal(versesFromBible(data, parseRef("요 3:16")).length, 1);
+  assert.equal(versesFromBible(data, parseRef("요 3:15-16")).length, 0);
+  assert.equal(versesFromBible(data, parseRef("요 3장")).length, 0);
+  assert.equal(versesFromBible(data, parseRef("행 6:1-9")).length, 0);
+  assert.deepEqual(wholeChapters([{ c: 6, v: 1 }, { c: 6, v: 2 }, { c: 6, v: 3 }, { c: 7, v: 2 }, { c: 7, v: 3 }]), [6]);
+});
