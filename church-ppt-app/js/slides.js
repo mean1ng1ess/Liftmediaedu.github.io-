@@ -2,8 +2,8 @@
 import { chunkLines, labelAbbrev, parseBody, parseOrder, resolveOrder } from "./lyrics.js";
 
 export const ITEM = { COVER: "cover", SONG: "song", SCRIPTURE: "scripture", SERMON: "sermon", TEXT: "text" };
-export const ITEM_LABELS = { cover: "표지·순서", song: "찬양", scripture: "성경", sermon: "설교", text: "광고/텍스트" };
-export const ITEM_ICONS = { cover: "🏠", song: "🎵", scripture: "📖", sermon: "🎤", text: "📝" };
+export const ITEM_LABELS = { cover: "표지·순서", song: "찬양", scripture: "성경", sermon: "설교", text: "광고/텍스트", fixed: "우리 교회 틀" };
+export const ITEM_ICONS = { cover: "🏠", song: "🎵", scripture: "📖", sermon: "🎤", text: "📝", fixed: "📌" };
 
 export function defaultData(kind) {
   return {
@@ -19,7 +19,7 @@ export function itemName(item) {
   const d = item.data;
   const name = {
     song: d.title || "(제목 없는 찬양)", scripture: d.reference || "(본문 미입력)",
-    sermon: d.title || "(설교 제목 없음)", cover: d.title || "표지", text: d.title || "(제목 없음)",
+    sermon: d.title || "(설교 제목 없음)", cover: d.title || "표지", text: d.title || "(제목 없음)", fixed: d.name || "(구역)",
   }[item.kind];
   return name;
 }
@@ -144,6 +144,7 @@ export function makeIds() { let v = 0; return { next: () => ++v }; }
 
 export function itemSlides(item, design, ids = makeIds()) {
   const d = item.data;
+  if (item.kind === "fixed") return [];   // 교회 틀의 원래 슬라이드 (미리보기 없음)
   if (item.kind === "song") return songSlides(itemToSong(item), design, ids);
   if (item.kind === "cover") {
     const sub = [d.subtitle, d.date].filter((x) => x && x.trim());

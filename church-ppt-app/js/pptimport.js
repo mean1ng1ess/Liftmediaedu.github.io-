@@ -9,7 +9,7 @@ const squash = (s) => s.replace(/\s+/g, "");
 function shapeTexts(xml) {
   const out = [];
   for (const sp of xml.match(/<p:sp>[\s\S]*?<\/p:sp>|<p:sp [\s\S]*?<\/p:sp>/g) || []) {
-    if (/<p:ph[^>]*type="(ftr|sldNum|dt)"/.test(sp)) continue;          // 바닥글/쪽번호/날짜
+    if (/<p:ph[^>]*type="(sldNum|dt)"/.test(sp)) continue;          // 쪽번호/날짜 (바닥글은 반복 여부로 판단)
     const lines = [];
     for (const p of sp.match(/<a:p>[\s\S]*?<\/a:p>|<a:p [\s\S]*?<\/a:p>/g) || []) {
       const t = p.replace(/<a:br\s*\/>/g, "\n").replace(/<a:t>([\s\S]*?)<\/a:t>|<a:t [^>]*>([\s\S]*?)<\/a:t>|<[^>]+>/g, (m, a, b) => decode(a ?? b ?? ""));
@@ -28,7 +28,8 @@ function partLabel(code, codesInSong) {
   if (!m) return code.trim();
   // (a)(b)(c)(d) 처럼 알파벳 순서로 붙인 이름이면 그대로 A/B/C/D
   const singles = codesInSong.filter((c) => /^[a-z]$/i.test(c.trim()));
-  if (singles.some((c) => !PART[c.toLowerCase()] || c.toLowerCase() === "a")) return code.trim().toUpperCase();
+  // "Part A" 로 저장해야 나중에 다시 읽어도 B=Bridge, C=Chorus 로 바뀌지 않는다
+  if (singles.some((c) => !PART[c.toLowerCase()] || c.toLowerCase() === "a")) return `Part ${code.trim().toUpperCase()}`;
   const letter = m[1].toLowerCase();
   const name = PART[letter.length === 1 ? letter : ""] || (letter === "pc" ? "Pre-Chorus" : null);
   if (!name) return code.trim().toUpperCase();

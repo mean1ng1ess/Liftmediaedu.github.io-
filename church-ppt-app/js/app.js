@@ -29,6 +29,24 @@ const state = {
   tab: "order",
   editing: null,
 };
+// 우리 교회 PPT 틀 (휴대폰 안에만 저장)
+const tpl = { name: "", data: null, analysis: null, loading: null };
+async function tplModule() {
+  await loadScript("vendor/jszip.min.js", "JSZip");
+  return import("./template.js");
+}
+async function loadTpl() {
+  try {
+    const T = await tplModule();
+    const saved = await T.loadTemplate();
+    if (!saved) return;
+    tpl.name = saved.name; tpl.data = saved.data;
+    tpl.analysis = await T.analyzeTemplate(saved.data);
+    render();
+  } catch (e) { console.warn(e); }
+}
+const hasFixed = () => state.service.items.some((it) => it.kind === "fixed");
+
 let saveTimer = null;
 function persist() {
   clearTimeout(saveTimer);
@@ -73,6 +91,18 @@ const naver = (q) => window.open("https://search.naver.com/search.naver?query=" 
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 async function makePpt(items, name) {
+  if (tpl.data && items.some((it) => it.kind === "fixed" || it.kind === "song") && hasFixed()) {
+    busy("우리 교회 틀로 PPT 만드는 중... (영상이 있어 조금 걸립니다)");
+    try {
+      const T = await tplModule();
+      const blob = await T.buildFromTemplate(tpl.data, items, { linesPerSlide: state.design.linesPerSlide });
+      busy();
+      toast("우리 교회 틀로 완성!");
+      await shareOrDownload(blob, `${today()}_${L.safeFilename(name)}.pptx`,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    } catch (e) { busy(); alert("PPT를 만들지 못했습니다.\n" + (e.message || e)); }
+    return;
+  }
   const slides = S.serviceSlides(items, state.design);
   if (!slides.length) { toast("만들 슬라이드가 없습니다."); return; }
   busy("PPT 만드는 중...");
@@ -100,9 +130,13 @@ function render() {
 function renderOrder(main) {
   const items = state.service.items;
   main.innerHTML = `
+    ${tpl.data ? `<div class="tplBox"><b>⛪ 우리 교회 PPT 틀</b> · ${esc(tpl.name)}<br><small>${hasFixed()
+      ? "📌 항목은 원래 슬라이드 그대로 (눌러서 이번 주 글자만 고치기) · 🎵 찬양만 바꾸면 됩니다"
+      : "예배 순서가 틀과 연결되어 있지 않습니다."}</small>
+      ${hasFixed() ? "" : `<button class="wide primary" id="tplReset">틀 순서로 예배 순서 만들기</button>`}</div>` : ""}
     <label class="field"><span>예배 이름</span><input id="svcName" value="${esc(state.service.name)}"></label>
     <div class="list">${items.map((it, i) => `
-      <div class="card" data-id="${it.id}">
+      <div class="card ${it.kind === "fixed" ? "fixed" : ""}" data-id="${it.id}">
         <button class="cardMain" data-act="edit">${S.ITEM_ICONS[it.kind]} <b>${esc(S.ITEM_LABELS[it.kind])}</b> · ${esc(S.itemName(it))}
           <small>${esc(itemInfo(it))}</small></button>
         <div class="cardBtns">
@@ -122,6 +156,7 @@ function renderOrder(main) {
     <button class="big go" id="makeAll">▶ 예배 전체 PPT 만들기</button>
     <p class="hint">Verse / Chorus / Bridge 가 PowerPoint <b>구역(섹션)</b>으로 나뉘어 만들어집니다.</p>`;
   $("#svcName").oninput = (e) => { state.service.name = e.target.value; persist(); };
+  if ($("#tplReset")) $("#tplReset").onclick = resetServiceFromTpl;
   main.querySelectorAll("[data-add]").forEach((b) => (b.onclick = () => addItem(b.dataset.add)));
   main.querySelectorAll(".card").forEach((card) => {
     const id = card.dataset.id;
@@ -135,6 +170,13 @@ function renderOrder(main) {
 }
 
 function itemInfo(it) {
+  if (it.kind === "fixed") {
+    if (it.data.skip) return "이번 주 빼기";
+    const sec = tpl.analysis && tpl.analysis.sections[it.data.sectionIndex];
+    const n = sec ? sec.ids.length : 0;
+    const changed = Object.values(it.data.edits || {}).some((e) => Object.keys(e).length);
+    return n ? `원래 슬라이드 ${n}장 그대로${changed ? " · ✏️ 글자 고침" : ""}` : "구역 이름만 (슬라이드 없음)";
+  }
   if (it.kind !== "song") return "";
   const song = S.itemToSong(it);
   if (!song.sections.length) return "가사 없음";
@@ -146,7 +188,9 @@ function addItem(kind, data) {
   const d = data || { ...S.defaultData(kind) };
   if (kind === "cover" && !data) d.date = nextSunday();
   const it = { id: uid(), kind, data: d };
-  state.service.items.push(it);
+  const at = state.service.items.findIndex((x) => x.id === state.lastTouched);
+  if (at >= 0 && hasFixed()) { state.service.items.splice(at + 1, 0, it); toast("마지막으로 고친 항목 바로 뒤에 넣었어요. ▲▼ 로 옮길 수 있어요."); }
+  else state.service.items.push(it);
   persist();
   openEditor(it.id);
 }
@@ -307,6 +351,16 @@ const SAMPLES = [
 function renderDesign(main) {
   const d = state.design;
   main.innerHTML = `
+    <div class="tplBox">
+      <h3>⛪ 우리 교회 PPT 틀</h3>
+      ${tpl.data ? `<p>✅ <b>${esc(tpl.name)}</b><br><small>구역 ${tpl.analysis ? tpl.analysis.sections.length : "?"}개 · 찬양이 아닌 부분(예배 시작, 사도신경, 기도·봉독·설교 카드, 말씀, 봉헌, 축도, 광고, 마침)은 원래 슬라이드 그대로 쓰고 찬양만 바꿉니다.</small></p>`
+        : `<p><small>교회에서 쓰는 PPT 파일을 한 번 넣어 두면, 그 파일을 그대로 틀로 써서 매주 찬양만 바꿔 만듭니다. (파일은 이 휴대폰 안에만 저장됩니다)</small></p>`}
+      <div class="row2"><button class="primary" id="tplPick">${tpl.data ? "다른 틀로 바꾸기" : "교회 PPT 틀 넣기"}</button>
+        <button id="tplClear" ${tpl.data ? "" : "disabled"}>틀 지우기</button></div>
+      <button class="wide" id="fontDl">🔤 글꼴(나눔스퀘어 네오) 설치 파일 받기</button>
+      <p class="hint">PPT 를 띄우는 컴퓨터에 '나눔스퀘어 네오' 가 없으면 다른 글꼴로 보입니다. 위 버튼으로 받은 파일을 그 컴퓨터에서 열어 [설치] 하세요.</p>
+    </div>
+    <p class="hint">아래 디자인은 틀 없이 새로 만들 때와 미리보기에 쓰입니다.</p>
     <label class="field"><span>기본 디자인 고르기</span><select id="preset"><option value="">(지금: ${esc(d.name || "직접 설정")})</option>${Object.keys(S.PRESETS).map((n) => `<option>${esc(n)}</option>`).join("")}</select></label>
     <div id="pv" class="pv"></div>
     ${DESIGN_FIELDS.map(([title, fields]) => `<details ${title === "배경" || title === "가사 글자" ? "open" : ""}><summary>${title}</summary>${fields.map(([p, label, type, a, b, step]) => {
@@ -326,6 +380,20 @@ function renderDesign(main) {
     for (const s of samples) pv.appendChild(thumb({ ...s, heading: s.kind === "lyrics" && d.showSongTitle ? "곡 제목" : s.heading }, d, 150, drawPv));
   };
   drawPv();
+  $("#tplPick").onclick = pickTemplate;
+  $("#tplClear").onclick = async () => {
+    if (!confirm("교회 PPT 틀을 지울까요? (예배 순서의 📌 항목도 함께 빠집니다)")) return;
+    (await tplModule()).clearTemplate();
+    Object.assign(tpl, { name: "", data: null, analysis: null });
+    state.service.items = state.service.items.filter((it) => it.kind !== "fixed");
+    persist(); render();
+  };
+  $("#fontDl").onclick = async () => {
+    for (const f of ["NanumSquareNeo-bRg.ttf", "NanumSquareNeo-cBd.ttf"]) {
+      const blob = await (await fetch("fonts/" + f)).blob();
+      await shareOrDownload(blob, f, "font/ttf");
+    }
+  };
   $("#preset").onchange = async (e) => {
     if (!e.target.value) return;
     const nd = S.normalizeDesign(S.presetDesign(e.target.value));
@@ -375,6 +443,12 @@ async function shrinkImage(file, maxW, q) {
 // ---- 도움말
 function renderHelp(main) {
   main.innerHTML = `<div class="help">
+    <h3>⛪ 우리 교회 PPT 틀로 만들기 (추천)</h3>
+    <p>1. [디자인] → <b>[교회 PPT 틀 넣기]</b> 에서 교회 PPT 파일을 한 번 고릅니다. (휴대폰 안에만 저장)<br>
+    2. [예배 순서] 가 교회 PPT 순서 그대로 채워집니다.<br>
+    &nbsp;&nbsp;· 📌 항목(예배가 곧 시작됩니다, 사도신경, 대표기도·봉독·설교 카드, 말씀, 봉헌, 축도, 광고, 마침)은 <b>원래 슬라이드 그대로</b> — 눌러서 이번 주 이름·설교 제목·광고 글자만 고치세요.<br>
+    &nbsp;&nbsp;· 🎵 찬양을 눌러 <b>[📚 보관함에서 고르기]</b> 로 이번 주 곡으로 바꾸세요.<br>
+    3. [▶ 예배 전체 PPT 만들기] — 구역(섹션)도 교회 PPT 처럼 <code>곡(v1)</code> <code>곡(c)</code> 로 나뉩니다.</p>
     <h3>📱 홈 화면에 앱으로 설치</h3>
     <p><b>안드로이드(크롬/삼성 인터넷)</b>: 메뉴 ⋮ → <b>홈 화면에 추가</b> 또는 <b>앱 설치</b><br>
     <b>아이폰(사파리)</b>: 아래 공유 버튼 □↑ → <b>홈 화면에 추가</b></p>
@@ -409,13 +483,14 @@ const BODY = {
   text: ["body", "내용 (빈 줄로 슬라이드 나눔)", ""],
 };
 
-function openEditor(id) { state.editing = id; renderEditor(); $("#editor").classList.add("show"); }
+function openEditor(id) { state.editing = id; state.lastTouched = id; renderEditor(); $("#editor").classList.add("show"); }
 function closeEditor() { state.editing = null; $("#editor").classList.remove("show"); render(); }
 
 function renderEditor() {
   const it = state.service.items.find((x) => x.id === state.editing);
   if (!it) return closeEditor();
   const ed = $("#editor");
+  if (it.kind === "fixed") return renderFixedEditor(it, ed);
   const [bk, blabel, bph] = BODY[it.kind] || [];
   ed.innerHTML = `
     <header><button id="edBack">← 완료</button><b>${S.ITEM_ICONS[it.kind]} ${S.ITEM_LABELS[it.kind]}</b><span></span></header>
@@ -423,6 +498,7 @@ function renderEditor() {
       ${FIELDS[it.kind].map(([k, label, ph]) => `<label class="field"><span>${label}</span><input data-f="${k}" value="${esc(it.data[k])}" placeholder="${esc(ph)}"></label>`).join("")}
       ${it.kind === "song" ? `
         <div class="grid3">
+          <button class="primary" data-a="lib">📚 보관함에서 고르기</button>
           <button class="primary" data-a="search">🔍 가사 검색</button>
           <button class="primary" data-a="paste">📋 붙여넣기+나누기</button>
           <button data-a="auto">⚡ 자동 나누기</button>
@@ -515,6 +591,7 @@ function autoSplit(it, raw) {
 
 async function editorAction(it, a) {
   const d = it.data;
+  if (a === "lib") return pickFromLibrary(it);
   if (a === "search") {
     if (!d.title.trim()) return toast("먼저 찬양 제목을 입력해 주세요.");
     naver(`${d.title} ${d.artist || ""} 가사`);
@@ -570,7 +647,97 @@ function ensureTesseract() {
   return tessLoading;
 }
 
+// ------------------------------------------------------------------ 우리 교회 틀
+async function pickTemplate() {
+  const [f] = await pickFiles(".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation");
+  if (!f) return;
+  busy("교회 PPT 를 살펴보는 중...");
+  try {
+    const T = await tplModule();
+    const data = await f.arrayBuffer();
+    const analysis = await T.analyzeTemplate(data);
+    await T.saveTemplate(f.name, data);
+    Object.assign(tpl, { name: f.name, data, analysis });
+    // 미리보기도 교회 PPT 와 같은 모양으로
+    const nd = S.normalizeDesign(S.presetDesign("Connection 목청"));
+    try { nd.cardImage = await urlToDataUrl(nd.cardImageUrl); } catch { /* 없음 */ }
+    delete nd.cardImageUrl;
+    nd.linesPerSlide = state.design.linesPerSlide || 2;
+    state.design = nd;
+    busy();
+    const songs = analysis.blocks.filter((b) => b.kind === "song").length;
+    const fixed = analysis.blocks.filter((b) => b.kind === "fixed").length;
+    if (confirm(`틀을 저장했습니다.\n\n· 그대로 쓰는 부분: ${fixed}개 (${analysis.blocks.filter((b) => b.kind === "fixed").map((b) => b.name).join(", ")})\n· 찬양: ${songs}곡\n\n지금 예배 순서를 이 틀의 순서로 새로 만들까요?`)) resetServiceFromTpl(true);
+    // 틀 안의 찬양도 보관함에 넣어 둔다
+    for (const b of analysis.blocks) if (b.kind === "song" && b.song && !state.library[b.song.title]) state.library[b.song.title] = L.songToText(b.song);
+    persist(); render();
+  } catch (e) { busy(); alert(e.message || String(e)); }
+}
+
+async function resetServiceFromTpl(skipConfirm) {
+  if (!tpl.analysis) return;
+  if (skipConfirm !== true && state.service.items.length && !confirm("지금 예배 순서를 지우고 틀 순서로 새로 만들까요?")) return;
+  const T = await tplModule();
+  state.service.items = T.serviceFromTemplate(tpl.analysis, uid);
+  persist(); render();
+}
+
+function renderFixedEditor(it, ed) {
+  const a = tpl.analysis;
+  const sec = a && a.sections[it.data.sectionIndex];
+  ed.innerHTML = `
+    <header><button id="edBack">← 완료</button><b>📌 ${esc(it.data.name)}</b><span></span></header>
+    <div class="edBody">
+      ${!a ? `<p class="empty">교회 PPT 틀을 불러오는 중이거나 없습니다. [디자인] 에서 틀을 넣어 주세요.</p>` : `
+      <p class="hint">원래 슬라이드를 그대로 씁니다 (영상·사진·표·글꼴 포함). 이번 주에 바뀌는 글자만 고치세요.</p>
+      <label class="chk"><input type="checkbox" id="fxSkip" ${it.data.skip ? "checked" : ""}> 이번 주에는 이 부분 빼기</label>
+      ${sec.ids.length ? sec.ids.map((id, n) => {
+        const fs = a.slideFields[id] || [];
+        const edits = (it.data.edits || {})[id] || {};
+        return `<div class="slideEd"><h4>${n + 1}번째 장${fs.length ? "" : " · 고칠 글자 없음 (그대로)"}</h4>${fs.map((f) => `
+          <label class="field"><span>${f.kind === "table" ? "표 (한 줄 = 표의 한 줄, | 로 칸 나눔)" : "글자"}</span>
+          <textarea rows="${Math.min(10, f.value.split("\n").length + 1)}" data-sid="${id}" data-key="${f.key}">${esc(edits[f.key] ?? f.value)}</textarea></label>`).join("")}</div>`;
+      }).join("") : `<p class="hint">이 구역은 제목만 있는 구역입니다 (슬라이드 없음).</p>`}
+      <button class="wide" id="fxReset">원래 글자로 되돌리기</button>`}
+    </div>`;
+  $("#edBack").onclick = closeEditor;
+  if (!a) return;
+  $("#fxSkip").onchange = (e) => { it.data.skip = e.target.checked; persist(); };
+  ed.querySelectorAll("textarea[data-sid]").forEach((ta) => (ta.oninput = () => {
+    it.data.edits = it.data.edits || {};
+    const e = (it.data.edits[ta.dataset.sid] = it.data.edits[ta.dataset.sid] || {});
+    const orig = (a.slideFields[ta.dataset.sid] || []).find((f) => f.key === ta.dataset.key);
+    if (orig && ta.value === orig.value) delete e[ta.dataset.key]; else e[ta.dataset.key] = ta.value;
+    persist();
+  }));
+  $("#fxReset").onclick = () => { if (confirm("이 부분을 원래 글자로 되돌릴까요?")) { it.data.edits = {}; persist(); renderEditor(); } };
+}
+
+function pickFromLibrary(it) {
+  const titles = Object.keys(state.library).sort((a, b) => a.localeCompare(b, "ko"));
+  if (!titles.length) return toast("보관함이 비어 있습니다.");
+  const box = document.createElement("div");
+  box.className = "pick";
+  box.innerHTML = `<div><h3>📚 보관함에서 고르기</h3><input class="search" placeholder="🔎 제목 검색"><div class="list"></div><button class="wide">닫기</button></div>`;
+  const list = box.querySelector(".list");
+  const draw = (q) => {
+    list.innerHTML = titles.filter((t) => !q || t.replace(/\s/g, "").includes(q.replace(/\s/g, ""))).map((t) => `<button class="wide" data-t="${esc(t)}">🎵 ${esc(t)}</button>`).join("");
+    list.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => {
+      const keep = { tplLead: it.data.tplLead, tplClosing: it.data.tplClosing };
+      it.data = { ...songData(L.parseSongText(state.library[b.dataset.t]), b.dataset.t), ...keep };
+      persist(); box.remove(); renderEditor();
+      toast(`'${b.dataset.t}' 로 바꿨습니다.`);
+    }));
+  };
+  draw("");
+  box.querySelector("input").oninput = (e) => draw(e.target.value);
+  box.querySelector("button.wide:last-child").onclick = () => box.remove();
+  document.body.appendChild(box);
+}
+
 // ------------------------------------------------------------------ 시작
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
 render();
+loadTpl();
+if (document.fonts) document.fonts.load('bold 20px "NanumSquare Neo Regular"').then(() => render()).catch(() => {});
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
